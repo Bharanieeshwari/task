@@ -1,0 +1,58 @@
+pipeline {
+  agent any
+   tools {
+    maven 'Maven'
+  }
+
+  environment {
+    AWS_REGION = "eu-north-1"
+    ECR_URL = "793799269057.dkr.ecr.eu-north-1.amazonaws.com"
+  }
+
+  stages {
+       stage('Build Spring Boot App with Maven') {
+      steps {
+        dir('springboot-app') {
+          sh 'mvn clean package -DskipTests'
+        }
+      }
+    }
+    
+    stage('Build Docker Images') {
+      steps {
+        sh 'docker build -t react-app ./Frontend'
+        sh 'docker build -t node-api ./Backend'
+        sh 'docker build -t spring-boot-app ./springboot-app'
+      }
+    }
+
+    stage('Push to ECR') {
+      steps {
+        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-creds']]) {
+          sh '''
+            aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_URL
+
+            docker tag react-app $ECR_URL/react-app:latest
+            docker push $ECR_URL/react-app:latest
+
+            docker tag node-api $ECR_URL/node-api:latest
+            docker push $ECR_URL/node-api:latest
+
+            docker tag spring-boot-app $ECR_URL/spring-boot-app:latest
+            docker push $ECR_URL/spring-boot-app:latest
+          '''
+        }
+      }
+    }
+
+    stage('Deploy to ECS') {
+      steps {
+        sh '''
+          aws ecs update-service --cluster murapp --service react-task-service-7no6ppzl --force-new-deployment --region $AWS_REGION
+          aws ecs update-service --cluster murapp --service node-task-service-3bvfo7sg --force-new-deployment --region $AWS_REGION
+          aws ecs update-service --cluster murapp --service spring-task-service-8tjn4yk0 --force-new-deployment --region $AWS_REGION
+        '''
+      }
+    }
+  }
+}
